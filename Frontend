@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Student Wellness Monitor</title>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{--bg:#f7fafc;--card:#ffffff;--muted:#6b7280;--accent:#6366f1}
+    *{box-sizing:border-box}
+    body{font-family:Inter,ui-sans-serif,system-ui, -apple-system,Segoe UI,Roboto, "Helvetica Neue",Arial; margin:0; background:linear-gradient(180deg,#ffffff 0%, var(--bg) 100%); color:#111827}
+    .container{max-width:1100px;margin:28px auto;padding:16px}
+    .grid{display:grid;gap:16px}
+    .cols-3{grid-template-columns:1fr 2fr}
+    .card{background:var(--card);border-radius:14px;padding:18px;box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+    h1,h2,h3{margin:0 0 8px 0}
+    p.small{color:var(--muted);font-size:13px;margin:0 0 12px}
+    .moods{display:flex;gap:8px}
+    .mood{flex:1;padding:10px;border-radius:10px;border:1px solid transparent;text-align:center;cursor:pointer;user-select:none}
+    .mood.choosen{outline:3px solid rgba(99,102,241,0.18)}
+    textarea{width:100%;min-height:70px;padding:10px;border-radius:8px;border:1px solid #e5e7eb}
+    button{background:var(--accent);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .muted{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:12px;align-items:center}
+    .recommendation{padding:8px;border-radius:8px;border:1px dashed #e6e9ff;font-size:14px}
+    .entries{display:flex;flex-direction:column;gap:8px}
+    .entry{padding:8px;border-radius:8px;border:1px solid #f3f4f6}
+    footer{font-size:12px;color:var(--muted);margin-top:18px}
+    @media (max-width:900px){.cols-3{grid-template-columns:1fr}.container{padding:12px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Wellness App — HTML Version</h1>
+    <p class="small">Daily mood check-ins, sensitive analysis (demo), personalized recommendations, trend visualization. Save as <code>index.html</code> and open in your browser or VSCode Live Server.</p>
+
+    <div class="grid cols-3">
+      <section class="card">
+        <h2>Daily Mood Check-in</h2>
+        <p class="small">Quickly log how you feel. Data stored locally (localStorage).</p>
+
+        <div id="moodRow" class="moods" style="margin-bottom:12px">
+          <!-- buttons injected by JS -->
+        </div>
+
+        <label class="muted">Quick note (optional)</label>
+        <textarea id="noteInput" placeholder="What was on your mind?"></textarea>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+          <button id="saveBtn">Save Check-in</button>
+          <button id="boosterBtn" style="background:transparent;color:var(--accent);border:1px solid rgba(99,102,241,0.15)">Quick booster</button>
+        </div>
+
+        <div id="analysis" style="margin-top:12px"></div>
+      </section>
+
+      <section class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h2>Mood Trends</h2>
+            <p class="small">Visualize your mood over time</p>
+          </div>
+          <div class="muted" id="entryCount">Entries: 0</div>
+        </div>
+
+        <canvas id="moodChart" style="width:100%;height:260px;margin-top:12px"></canvas>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+          <div>
+            <h3 style="font-size:15px;margin-bottom:6px">Personalized Recommendations</h3>
+            <div id="recommendations" style="display:grid;gap:8px"></div>
+          </div>
+
+          <div>
+            <h3 style="font-size:15px;margin-bottom:6px">Recent Entries</h3>
+            <div id="entries" class="entries"></div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+
+    <footer>Design notes: simple, accessible, responsive. This demo uses a client-side heuristic for sensitive analysis — in production, run server-side and include crisis escalation flows.</footer>
+  </div>
+
+  <script>
+    // --- Data & Utilities ---
+    const MOODS = [
+      {label:'Terrible',val:1,emoji:'😫'},
+      {label:'Bad',val:2,emoji:'😕'},
+      {label:'Okay',val:3,emoji:'😐'},
+      {label:'Good',val:4,emoji:'🙂'},
+      {label:'Great',val:5,emoji:'😄'},
+    ];
+
+    const storageKey = 'wellness_html_history_v1';
+    let history = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    let currentMood = 3;
+
+    // --- DOM refs ---
+    const moodRow = document.getElementById('moodRow');
+    const noteInput = document.getElementById('noteInput');
+    const saveBtn = document.getElementById('saveBtn');
+    const boosterBtn = document.getElementById('boosterBtn');
+    const analysisEl = document.getElementById('analysis');
+    const entriesEl = document.getElementById('entries');
+    const recsEl = document.getElementById('recommendations');
+    const entryCountEl = document.getElementById('entryCount');
+
+    // --- Render mood buttons ---
+    function renderMoodButtons(){
+      moodRow.innerHTML = '';
+      MOODS.forEach(m => {
+        const btn = document.createElement('div');
+        btn.className = 'mood' + (m.val===currentMood? ' choosen':'');
+        btn.innerHTML = `<div style="font-size:20px">${m.emoji}</div><div style="font-size:12px;margin-top:6px">${m.label}</div>`;
+        btn.onclick = ()=>{ currentMood = m.val; renderMoodButtons(); };
+        moodRow.appendChild(btn);
+      })
+    }
+
+    // --- Simple sensitive analysis (demo only) ---
+    const FLAGS = ['suicide','kill','die','hurt','hopeless','alone','worthless'];
+    function analyzeText(text){
+      const lowered = text.toLowerCase();
+      const found = FLAGS.filter(w => lowered.includes(w));
+      return {score: Math.min(1, found.length/2), found};
+    }
+
+    // --- Save check-in ---
+    function saveCheckin(){
+      const note = noteInput.value.trim();
+      const timestamp = new Date().toISOString();
+      const item = {timestamp, mood: currentMood, note};
+      history.push(item);
+      localStorage.setItem(storageKey, JSON.stringify(history));
+      noteInput.value = '';
+      const analysis = analyzeText(note);
+      renderAnalysis(analysis);
+      renderAll();
+    }
+
+    // --- Render analysis ---
+    function renderAnalysis(a){
+      if(!a) { analysisEl.innerHTML = ''; return }
+      analysisEl.innerHTML = `
+        <div style="margin-top:8px;padding:10px;border-radius:8px;background:#fffbea;border:1px solid #fcefc7">
+          <strong style="display:block">Sensitive content check</strong>
+          <div style="font-size:13px;color:${a.found.length? '#b91c1c':'#374151'}">Score: ${a.score.toFixed(2)}</div>
+          ${a.found.length ? `<div style="font-size:13px;color:#b91c1c">Flagged words: ${a.found.join(', ')}</div>` : '<div class="muted" style="font-size:13px">No flagged content detected.</div>'}
+          <div class="muted" style="font-size:12px;margin-top:6px">(Demo heuristic — for any risk contact a professional.)</div>
+        </div>
+      `;
+    }
+
+    // --- Recommendations ---
+    function computeRecommendations(){
+      const last3 = history.slice(-3).map(h=>h.mood);
+      const avg = last3.length ? last3.reduce((a,b)=>a+b,0)/last3.length : currentMood;
+      const recs = [];
+      if(avg <= 2.5){
+        recs.push('Try a 5-minute breathing exercise');
+        recs.push('Reach out to a friend or family member');
+        recs.push('Short guided mindfulness (10 mins)');
+      } else if(avg <= 3.5){
+        recs.push('Take a quick walk or stretch break');
+        recs.push('Write 3 things you appreciate today');
+      } else {
+        recs.push('Journal one positive event from today');
+        recs.push('Celebrate a small win: do something kind for yourself');
+      }
+      return recs;
+    }
+
+    function renderRecommendations(){
+      const recs = computeRecommendations();
+      recsEl.innerHTML = '';
+      recs.forEach(r=>{
+        const d = document.createElement('div'); d.className='recommendation'; d.textContent = r; recsEl.appendChild(d);
+      })
+    }
+
+    // --- Entries list ---
+    function renderEntries(){
+      entriesEl.innerHTML = '';
+      const slice = history.slice(-6).reverse();
+      if(!slice.length){ entriesEl.innerHTML = '<div class="muted">No entries yet.</div>'; return }
+      slice.forEach(h=>{
+        const div = document.createElement('div'); div.className='entry';
+        div.innerHTML = `<div style="display:flex;justify-content:space-between"><div style="font-size:13px">${new Date(h.timestamp).toLocaleString()}</div><div style="font-weight:600">${MOODS.find(m=>m.val===h.mood).emoji} ${MOODS.find(m=>m.val===h.mood).label}</div></div>${h.note? '<div style="margin-top:6px;color:#374151;font-size:13px">'+h.note+'</div>':''}`;
+        entriesEl.appendChild(div);
+      })
+    }
+
+    // --- Chart ---
+    let chart = null;
+    function renderChart(){
+      const ctx = document.getElementById('moodChart').getContext('2d');
+      const data = history.map(h=>({x:new Date(h.timestamp).toLocaleDateString(), y:h.mood}));
+      const labels = data.map(d=>d.x);
+      const values = data.map(d=>d.y);
+      if(chart){ chart.data.labels = labels; chart.data.datasets[0].data = values; chart.update(); return }
+
+      chart = new Chart(ctx, {
+        type:'line',
+        data:{ labels, datasets:[{label:'Mood', data:values, fill:false, tension:0.3, borderColor:'#6366f1', borderWidth:3, pointRadius:4}]},
+        options:{ scales:{ y:{min:1,max:5, ticks:{stepSize:1}} }, plugins:{ legend:{display:false} }, maintainAspectRatio:false }
+      })
+    }
+
+    // --- Render everything ---
+    function renderAll(){
+      renderMoodButtons();
+      renderEntries();
+      renderRecommendations();
+      renderChart();
+      entryCountEl.textContent = 'Entries: ' + history.length;
+    }
+
+    // --- Events ---
+    saveBtn.onclick = saveCheckin;
+    boosterBtn.onclick = ()=>{
+      const recs = computeRecommendations(); recs.unshift('Do a 2-minute breathing reset');
+      recsEl.innerHTML = ''; recs.forEach(r=>{const d=document.createElement('div');d.className='recommendation';d.textContent=r;recsEl.appendChild(d)})
+    };
+
+    // init
+    renderAll();
+    renderAnalysis();
+  </script>
+</body>
+</html>
